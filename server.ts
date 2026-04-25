@@ -4,6 +4,8 @@ import path from "path";
 import { fileURLToPath } from "url";
 import axios from "axios";
 import fs from "fs";
+import cors from "cors";
+import crypto from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,6 +20,7 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(cors());
   app.use(express.json());
 
   // Serve cached audio files
@@ -37,10 +40,17 @@ async function startServer() {
       // Check if it's a Google Apps Script Web App
       if (sheetUrl.includes("script.google.com")) {
         const response = await axios.get(sheetUrl);
-        results = response.data.map((item: any) => ({
+        // Ensure response data is treated correctly (it might be an object if JSON was returned)
+        const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+        
+        if (!Array.isArray(data)) {
+          throw new Error("Dữ liệu từ Apps Script không phải là một danh sách (Array)");
+        }
+
+        results = data.map((item: any) => ({
           stt: item.stt.toString().padStart(3, '0'),
-          fullname: item.ten,
-          extractedName: item.ten,
+          fullname: item.ten || item.fullname || "N/A",
+          extractedName: item.ten || item.fullname || "N/A",
           group: "APPS SCRIPT",
           mp3: item.mp3
         }));
@@ -61,30 +71,28 @@ async function startServer() {
           if (!line) continue;
           const columns = line.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
           
-          const sttRaw = columns[0] || (i).toString();
+          if (columns.length < 2) continue;
+
+          const sttRaw = columns[0] || i.toString();
           const stt = parseInt(sttRaw);
           const fullname = columns[1] || "";
           
           if (fullname) {
             const batchNum = Math.floor((stt - 1) / 8 + 1);
             const posInBatch = ((stt - 1) % 8 + 1);
-            // Format requested by user
             const ttsText = `Lượt ${batchNum} số ${posInBatch} ${fullname}`;
             const mp3Url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=${encodeURIComponent(ttsText)}`;
             
             results.push({
               stt: stt.toString().padStart(3, '0'),
               fullname: fullname,
-              extractedName: fullname, // Use full name for quality
+              extractedName: fullname,
               group: `Lượt ${batchNum}`,
               mp3: mp3Url
             });
           }
         }
       }
-
-      // Optional: Logic to download and cache files (in background or sync)
-      // For now, return the metadata. We will serve via a proxy if requested.
 
       res.json({ 
         success: true, 
@@ -99,24 +107,37 @@ async function startServer() {
     }
   });
 
-  // Proxy endpoint to stream audio through server (Helps ESP32 bypass HTTPS issues if needed)
+  // Proxy endpoint with Caching
   app.get("/api/proxy-audio", async (req, res) => {
     const { url } = req.query;
     if (!url) return res.status(400).send("No URL");
 
+    // Create a unique filename for the URL
+    const hash = crypto.createHash('md5').update(url as string).digest('hex');
+    const cachePath = path.join(CACHE_DIR, `${hash}.mp3`);
+
+    // Check if already cached
+    if (fs.existsSync(cachePath)) {
+      console.log(`Serving cached audio: ${hash}.mp3`);
+      return res.sendFile(cachePath);
+    }
+
     try {
+      console.log(`Downloading audio for cache: ${url}`);
       const response = await axios({
         method: 'get',
         url: url as string,
-        responseType: 'stream',
+        responseType: 'arraybuffer',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
       });
       
+      fs.writeFileSync(cachePath, response.data);
       res.set('Content-Type', 'audio/mpeg');
-      response.data.pipe(res);
+      res.send(response.data);
     } catch (error: any) {
+      console.error("Proxy Audio Error:", error.message);
       res.status(500).send(error.message);
     }
   });
