@@ -29,6 +29,7 @@ async function startServer() {
   // API Route for Google Sheets / Apps Script Sync
   app.post("/api/sync-sheet", async (req, res) => {
     const { sheetUrl } = req.body;
+    console.log(`Received sync request for URL: ${sheetUrl}`);
 
     if (!sheetUrl) {
       return res.status(400).json({ error: "Thiếu đường dẫn (Sheet URL hoặc script URL)" });
@@ -40,7 +41,6 @@ async function startServer() {
       // Check if it's a Google Apps Script Web App
       if (sheetUrl.includes("script.google.com")) {
         const response = await axios.get(sheetUrl);
-        // Ensure response data is treated correctly (it might be an object if JSON was returned)
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         
         if (!Array.isArray(data)) {
@@ -48,29 +48,52 @@ async function startServer() {
         }
 
         results = data.map((item: any) => ({
-          stt: item.stt.toString().padStart(3, '0'),
+          stt: item.stt?.toString().padStart(3, '0') || "000",
           fullname: item.ten || item.fullname || "N/A",
           extractedName: item.ten || item.fullname || "N/A",
           group: "APPS SCRIPT",
           mp3: item.mp3
         }));
       } else {
-        // Handle as regular Google Sheet
-        const match = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-        if (!match) {
-          return res.status(400).json({ error: "Link Google Sheet không hợp lệ" });
+        // More robust Sheet ID extraction
+        let sheetId = "";
+        const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{15,})/);
+        if (idMatch) {
+          sheetId = idMatch[1];
+        } else if (sheetUrl.match(/^[a-zA-Z0-9-_]{15,}$/)) {
+          sheetId = sheetUrl;
         }
-        const sheetId = match[1];
+
+        if (!sheetId) {
+          return res.status(400).json({ error: "Link hoặc ID Google Sheet không hợp lệ" });
+        }
         const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+        
+        console.log(`Fetching CSV from: ${csvUrl}`);
         const response = await axios.get(csvUrl);
         const csvData = response.data;
+
+        // Check if we got HTML instead of CSV (Google redirects to login if not public)
+        if (typeof csvData === 'string' && (csvData.includes('<!DOCTYPE html>') || csvData.includes('<html'))) {
+          console.error("Received HTML instead of CSV for Sheet ID:", sheetId);
+          return res.status(403).json({ 
+            error: "Tệp Google Sheet chưa được công khai. Vui lòng chọn 'Bất kỳ ai có liên kết đều có thể xem' (Anyone with the link can view)." 
+          });
+        }
         
         const lines = csvData.split("\n");
-        for (let i = 1; i < lines.length; i++) {
+        for (let i = 0; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
-          const columns = line.split(",").map(c => c.trim().replace(/^"|"$/g, ""));
           
+          // Better CSV split handling quotes
+          const columns = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, ""));
+          
+          // Skip header if it looks like one (contains 'Họ tên' or 'FullName' or 'STT')
+          if (i === 0 && (line.toLowerCase().includes("họ tên") || line.toLowerCase().includes("fullname") || line.toLowerCase().includes("stt"))) {
+            continue;
+          }
+
           if (columns.length < 2) continue;
 
           const sttRaw = columns[0] || i.toString();

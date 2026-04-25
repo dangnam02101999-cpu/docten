@@ -378,7 +378,15 @@ function SheetsConfig({ addLog, entities, setEntities, syncInfo, setSyncInfo }: 
         body: JSON.stringify({ sheetUrl }),
       });
       
-      const result = await response.json();
+      const contentType = response.headers.get('content-type');
+      let result;
+      
+      if (contentType && contentType.includes('application/json')) {
+        result = await response.json();
+      } else {
+        const text = await response.text();
+        throw new Error(`Phản hồi từ máy chủ không hợp lệ (Không phải JSON): ${text.substring(0, 50)}...`);
+      }
       
       if (!response.ok) {
         throw new Error(result.error || 'Lỗi không xác định');
