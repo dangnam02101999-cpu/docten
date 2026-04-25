@@ -1,0 +1,6 @@
+{
+  "name": "SheetTalk AI",
+  "description": "Hệ thống quản lý âm thanh và dữ liệu cho ESP32-TTS từ Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
