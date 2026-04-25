@@ -11,12 +11,12 @@ import {
   Settings, 
   Info, 
   Wand2, 
-  SyncSavedLocally, 
+  CheckCircle2,
   Trash2, 
   PlayCircle, 
   Copy, 
   Terminal, 
-  CheckCircle2,
+  RefreshCw as SyncIcon,
   MemoryStick as Memory,
   User,
   Radio,
@@ -38,6 +38,8 @@ interface LogEntry {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [entities, setEntities] = useState<any[]>([]);
+  const [syncInfo, setSyncInfo] = useState({ time: 'Chưa đồng bộ', count: 0 });
   const [logs, setLogs] = useState<LogEntry[]>([
     { time: '10:45:01', type: 'info', message: 'Initializing I2S peripheral...' },
     { time: '10:45:02', type: 'info', message: 'Connecting to SSID: "Lab-WiFi-Guest"' },
@@ -137,9 +139,9 @@ export default function App() {
       {/* Main Content */}
       <main className="flex-1 md:ml-64 relative z-10 px-4 py-6 md:px-8 md:py-10 pb-28 md:pb-10">
         <AnimatePresence mode="wait">
-          {activeTab === 'dashboard' && <Dashboard key="dashboard" setActiveTab={setActiveTab} logs={logs} />}
-          {activeTab === 'sheets' && <SheetsConfig key="sheets" />}
-          {activeTab === 'audio' && <AudioManagement key="audio" />}
+          {activeTab === 'dashboard' && <Dashboard key="dashboard" setActiveTab={setActiveTab} logs={logs} syncInfo={syncInfo} />}
+          {activeTab === 'sheets' && <SheetsConfig key="sheets" addLog={addLog} entities={entities} setEntities={setEntities} syncInfo={syncInfo} setSyncInfo={setSyncInfo} />}
+          {activeTab === 'audio' && <AudioManagement key="audio" addLog={addLog} entities={entities} />}
           {activeTab === 'esp32' && <DeviceControls key="esp32" logs={logs} addLog={addLog} />}
         </AnimatePresence>
       </main>
@@ -171,7 +173,7 @@ export default function App() {
   );
 }
 
-function NavItem({ icon, label, isActive, onClick }: { icon: JSX.Element, label: string, isActive: boolean, onClick: () => void }) {
+function NavItem({ icon, label, isActive, onClick }: { icon: any, label: string, isActive: boolean, onClick: () => void }) {
   return (
     <button 
       onClick={onClick}
@@ -188,7 +190,7 @@ function NavItem({ icon, label, isActive, onClick }: { icon: JSX.Element, label:
   );
 }
 
-function MobileNavItem({ icon, isActive, onClick }: { icon: JSX.Element, isActive: boolean, onClick: () => void }) {
+function MobileNavItem({ icon, isActive, onClick }: { icon: any, isActive: boolean, onClick: () => void }) {
   return (
     <button 
       onClick={onClick}
@@ -201,7 +203,7 @@ function MobileNavItem({ icon, isActive, onClick }: { icon: JSX.Element, isActiv
 
 /* --- VIEW COMPONENTS --- */
 
-function Dashboard({ setActiveTab, logs }: { setActiveTab: (t: Tab) => void, logs: LogEntry[] }) {
+function Dashboard({ setActiveTab, logs, syncInfo }: { key?: any, setActiveTab: (t: Tab) => void, logs: LogEntry[], syncInfo: any }) {
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }} 
@@ -218,7 +220,7 @@ function Dashboard({ setActiveTab, logs }: { setActiveTab: (t: Tab) => void, log
         <StatusCard title="ESP32 STATUS" value="ONLINE" subValue="IP: 192.168.1.102" status="success" icon={<Cpu size={24} />} />
         <StatusCard title="STREAM STATUS" value="ACTIVE" subValue="8080:TCP/HTTP" status="primary" icon={<Radio size={24} />} />
         <StatusCard title="SD CARD" value="42%" subValue="13.2GB / 32GB" status="tertiary" icon={<HardDrive size={24} />} />
-        <StatusCard title="SHEET SYNC" value="OK" subValue="27-10-2023 14:22" status="success" icon={<RefreshCw size={24} />} />
+        <StatusCard title="SHEET SYNC" value="OK" subValue={syncInfo.time} status="success" icon={<RefreshCw size={24} />} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -302,7 +304,100 @@ function Dashboard({ setActiveTab, logs }: { setActiveTab: (t: Tab) => void, log
   );
 }
 
-function SheetsConfig() {
+function SheetsConfig({ addLog, entities, setEntities, syncInfo, setSyncInfo }: { key?: any, addLog: (m: string, t?: LogEntry['type']) => void, entities: any[], setEntities: any, syncInfo: any, setSyncInfo: any }) {
+  const [sheetUrl, setSheetUrl] = useState('https://docs.google.com/spreadsheets/d/1o_XfosXZXcoYIP7CHMO5fqeY5js8m231w8h_yzrzK-0/edit?gid=0#gid=0');
+  const [loading, setLoading] = useState(false);
+
+  const speak = (text: string) => {
+    try {
+      // Using the exact parameter order and common client variant for best compatibility
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=${encodeURIComponent(text)}`;
+      
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+
+      const audio = new Audio();
+      // Use local proxy by default to avoid CORS and potential loading issues in the browser
+      const proxyUrl = `/api/proxy-audio?url=${encodeURIComponent(url)}`;
+      audio.src = proxyUrl;
+
+      audio.oncanplaythrough = () => {
+        audio.play().catch(err => {
+          console.error("Audio playback interrupted/blocked:", err);
+          addLog(`Playback error: ${err.message}`, 'warning');
+          fallbackToSpeechSynthesis(text);
+        });
+      };
+
+      audio.onerror = (e) => {
+        console.error("Audio engine failed to load:", e);
+        addLog(`Lỗi tải âm thanh từ proxy: ${text.substring(0, 30)}...`, 'warning');
+        fallbackToSpeechSynthesis(text);
+      };
+
+      addLog(`Yêu cầu phát âm thanh: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`, 'stream');
+    } catch (err: any) {
+      addLog(`Lỗi hệ thống âm thanh: ${err.message}`, 'warning');
+      fallbackToSpeechSynthesis(text);
+    }
+  };
+
+  const fallbackToSpeechSynthesis = (text: string) => {
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'vi-VN';
+      utterance.rate = 0.95; // Slightly slower for clarity
+      
+      // Try to find a better Vietnamese voice
+      const voices = window.speechSynthesis.getVoices();
+      const viVoice = voices.find(v => v.lang.toLowerCase().includes('vi'));
+      if (viVoice) {
+        utterance.voice = viVoice;
+      }
+      
+      window.speechSynthesis.speak(utterance);
+    } else {
+      addLog('Trình duyệt không hỗ trợ phát âm thanh', 'warning');
+    }
+  };
+
+  const playTTS = (text: string) => {
+    speak(text);
+  };
+
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSync = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch('/api/sync-sheet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sheetUrl }),
+      });
+      
+      const result = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(result.error || 'Lỗi không xác định');
+      }
+
+      setEntities(result.data.map((item: any) => ({
+        ...item,
+        status: 'primary'
+      })));
+      setSyncInfo({ time: result.syncTime, count: result.count });
+      addLog(`Đồng bộ thành công ${result.count} thực thể từ Google Sheets.`, 'success');
+    } catch (err: any) {
+      setError(err.message);
+      addLog(`Lỗi đồng bộ: ${err.message}`, 'warning');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0, x: 20 }} 
@@ -341,18 +436,37 @@ function SheetsConfig() {
             <div className="relative">
               <input 
                 type="text" 
+                value={sheetUrl}
+                onChange={(e) => setSheetUrl(e.target.value)}
                 className="w-full bg-surface-container-low border border-outline-variant rounded-xl px-4 py-3 text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none transition-all placeholder:text-slate-600 pr-12"
                 placeholder="https://docs.google.com/spreadsheets/d/..."
               />
-              <button className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors">
-                <Expand size={18} />
+              <button 
+                onClick={() => setSheetUrl('')}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant hover:text-primary transition-colors"
+              >
+                <Trash2 size={18} />
               </button>
             </div>
           </div>
+
+          {error && (
+            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-500 flex items-center gap-2">
+              <Info size={14} />
+              {error}
+            </div>
+          )}
+
           <div className="flex gap-3">
-            <button className="flex-1 bg-primary-container text-white font-bold py-4 rounded-xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all shadow-lg shadow-primary-container/20">
-              <RefreshCw size={20} />
-              <span className="font-display text-sm tracking-wide">ĐỒNG BỘ & TỰ ĐỘNG TÁCH</span>
+            <button 
+              onClick={handleSync}
+              disabled={loading}
+              className={`flex-1 bg-primary-container text-white font-bold py-4 rounded-xl flex items-center justify-center gap-3 active:scale-[0.98] transition-all shadow-lg shadow-primary-container/20 ${loading ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
+              <span className="font-display text-sm tracking-wide">
+                {loading ? 'ĐANG ĐỒNG BỘ...' : 'ĐỒNG BỘ & TỰ ĐỘNG TÁCH'}
+              </span>
             </button>
             <button className="w-14 bg-surface-container-high border border-outline-variant rounded-xl flex items-center justify-center text-on-surface-variant hover:bg-surface-container-highest transition-colors">
               <Settings size={22} />
@@ -361,11 +475,23 @@ function SheetsConfig() {
         </div>
       </section>
 
+      {/* Status Info */}
+      <div className="flex items-center justify-between px-2">
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-widest">Đồng bộ:</span>
+          <span className="text-[10px] font-mono font-bold text-secondary">{syncInfo.time}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-widest">Số lượng:</span>
+          <span className="text-[10px] font-mono font-bold text-primary">{syncInfo.count} TÊN</span>
+        </div>
+      </div>
+
       <section className="bg-surface-container border border-outline-variant rounded-2xl overflow-hidden">
         <div className="px-6 py-4 border-b border-outline-variant flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h3 className="font-display font-bold uppercase text-xs tracking-widest">Danh sách thực thể</h3>
-            <span className="px-2 py-0.5 bg-secondary/10 text-secondary text-[8px] font-bold rounded border border-secondary/20">EXTRACTED</span>
+            <span className="px-2 py-0.5 bg-secondary/10 text-secondary text-[8px] font-bold rounded border border-secondary/20">AUTO-SYNCED</span>
           </div>
           <div className="flex gap-4">
             <Search size={16} className="text-on-surface-variant cursor-pointer" />
@@ -374,23 +500,36 @@ function SheetsConfig() {
         </div>
         
         <div className="divide-y divide-outline-variant/30">
-          <EntityRow stt="001" name="Alexander Pierce" group="NHÓM A" tag="Pierce" status="success" />
-          <EntityRow stt="002" name="Sarah Jenkins" group="NHÓM B" tag="Jenkins" status="primary" />
-          <EntityRow stt="003" name="Robert Fox" group="NHÓM A" tag="Fox" status="primary" />
-          <EntityRow stt="004" name="Emily Blunt" group="HỆ THỐNG" tag="Blunt" status="success" />
+          {entities.length > 0 ? entities.map((entity, idx) => (
+            <EntityRow 
+              key={idx}
+              stt={entity.stt} 
+              name={entity.fullname} 
+              group={entity.group} 
+              tag={entity.extractedName} 
+              status={entity.status as any} 
+              onPlay={playTTS}
+            />
+          )) : (
+            <div className="p-10 text-center text-on-surface-variant text-sm">
+              Chưa có dữ liệu. Vui lòng bấm đồng bộ.
+            </div>
+          )}
         </div>
 
-        <div className="p-4 bg-surface-container-low/50 flex justify-center">
-            <button className="text-[10px] font-display font-bold text-primary uppercase tracking-widest flex items-center gap-2 hover:underline">
-              Xem thêm 120 dòng khác
-            </button>
-        </div>
+        {entities.length > 4 && (
+          <div className="p-4 bg-surface-container-low/50 flex justify-center">
+              <button className="text-[10px] font-display font-bold text-primary uppercase tracking-widest flex items-center gap-2 hover:underline">
+                Xem thêm {entities.length - 4} dòng khác
+              </button>
+          </div>
+        )}
       </section>
     </motion.div>
   );
 }
 
-function EntityRow({ stt, name, group, tag, status }: { stt: string, name: string, group: string, tag: string, status: 'success' | 'primary' }) {
+function EntityRow({ stt, name, group, tag, status, onPlay }: { key?: any, stt: string, name: string, group: string, tag: string, status: 'success' | 'primary', onPlay?: (name: string) => void }) {
   return (
     <div className="flex items-center p-4 hover:bg-surface-container-highest/30 transition-colors group">
       <div className="w-12 text-xs font-mono text-on-surface-variant">{stt}</div>
@@ -402,15 +541,98 @@ function EntityRow({ stt, name, group, tag, status }: { stt: string, name: strin
         <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${status === 'success' ? 'bg-secondary/10 text-secondary' : 'bg-primary/10 text-primary'}`}>
           {tag}
         </span>
-        <button className="p-2 bg-surface-container-low border border-outline-variant rounded-full text-primary hover:bg-primary-container hover:text-white transition-all shadow-sm">
-          {status === 'success' ? <CheckCircle2 size={14} /> : <Mic2 size={14} />}
+        <button 
+          onClick={() => onPlay?.(name)}
+          className="p-2 bg-surface-container-low border border-outline-variant rounded-full text-primary hover:bg-primary-container hover:text-white transition-all shadow-sm active:scale-90"
+          title="Đọc họ tên đầy đủ"
+        >
+          <Mic2 size={14} />
         </button>
       </div>
     </div>
   );
 }
 
-function AudioManagement() {
+function AudioManagement({ addLog, entities }: { key?: any, addLog: (m: string, t?: LogEntry['type']) => void, entities: any[] }) {
+  const speak = (text: string) => {
+    try {
+      const url = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=${encodeURIComponent(text)}`;
+      
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+
+      const audio = new Audio();
+      const proxyUrl = `/api/proxy-audio?url=${encodeURIComponent(url)}`;
+      audio.src = proxyUrl;
+
+      audio.oncanplaythrough = () => {
+        audio.play().catch(err => {
+          console.error("Audio playback interrupted/blocked:", err);
+          addLog(`Playback error: ${err.message}`, 'warning');
+          fallbackToSpeechSynthesis(text);
+        });
+      };
+
+      audio.onerror = (e) => {
+        console.error("Audio engine failed to load:", e);
+        addLog(`Lỗi tải âm thanh từ proxy: ${text.substring(0, 30)}...`, 'warning');
+        fallbackToSpeechSynthesis(text);
+      };
+
+      addLog(`Yêu cầu phát âm thanh: "${text.substring(0, 50)}${text.length > 50 ? '...' : ''}"`, 'stream');
+    } catch (err: any) {
+      addLog(`Lỗi hệ thống âm thanh: ${err.message}`, 'warning');
+      fallbackToSpeechSynthesis(text);
+    }
+  };
+
+  const fallbackToSpeechSynthesis = (text: string) => {
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'vi-VN';
+      utterance.rate = 0.95;
+      
+      const voices = window.speechSynthesis.getVoices();
+      const viVoice = voices.find(v => v.lang.toLowerCase().includes('vi'));
+      if (viVoice) {
+        utterance.voice = viVoice;
+      }
+      
+      window.speechSynthesis.speak(utterance);
+    } else {
+      addLog('Trình duyệt không hỗ trợ phát âm thanh', 'warning');
+    }
+  };
+
+  const playTTS = (text: string) => {
+    speak(text);
+  };
+
+  const playBatch = (batchIndices: number[]) => {
+    const batchNum = Math.floor(batchIndices[0] / 8) + 1;
+    const batchText = batchIndices.map((i, idx) => {
+      const entity = entities[i];
+      const posInBatch = (i % 8) + 1;
+      if (idx === 0) return `Lượt ${batchNum} số ${posInBatch} ${entity.fullname}`;
+      return `số ${posInBatch} ${entity.fullname}`;
+    }).join(", ");
+    
+    playTTS(batchText);
+  };
+
+  // Group entities into batches of 8
+  const batches = [];
+  for (let i = 0; i < entities.length; i += 8) {
+    const batch = entities.slice(i, i + 8).map((_, idx) => i + idx);
+    batches.push({
+      id: Math.floor(i / 8) + 1,
+      indices: batch,
+      startStt: entities[i].stt,
+      endStt: entities[Math.min(i + 7, entities.length - 1)].stt
+    });
+  }
+
   return (
     <motion.div 
       initial={{ opacity: 0, scale: 0.95 }} 
@@ -473,9 +695,9 @@ function AudioManagement() {
 
         <div className="lg:col-span-12 bg-surface-container border border-outline-variant rounded-2xl overflow-hidden shadow-2xl">
            <div className="px-6 py-4 bg-surface-container-highest/50 border-b border-outline-variant flex justify-between items-center">
-              <span className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-widest">Danh sách tệp âm thanh & HTTP Stream Links</span>
+              <span className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-widest">DANH SÁCH TỆP ÂM THANH THEO LƯỢT (BATCH MODE)</span>
               <div className="relative">
-                <input type="text" className="bg-surface-container-low border border-outline-variant rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-primary outline-none min-w-[200px]" placeholder="Tìm kiếm tệp..." />
+                <input type="text" className="bg-surface-container-low border border-outline-variant rounded-lg px-3 py-1.5 text-xs focus:ring-1 focus:ring-primary outline-none min-w-[200px]" placeholder="Tìm kiếm lượt..." />
                 <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-on-surface-variant" />
               </div>
            </div>
@@ -483,16 +705,44 @@ function AudioManagement() {
               <table className="w-full text-left">
                 <thead>
                   <tr className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-tighter border-b border-outline-variant/30">
-                    <th className="px-6 py-4">Tên tệp</th>
+                    <th className="px-6 py-4">Nhóm / Lượt</th>
+                    <th className="px-6 py-4">Phạm vi STT</th>
                     <th className="px-6 py-4">HTTP Stream Link</th>
-                    <th className="px-6 py-4">Dung lượng</th>
-                    <th className="px-6 py-4 text-right">Phát thử</th>
+                    <th className="px-6 py-4 text-right">Thao tác</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-outline-variant/30">
-                   <AudioRow name="welcome_msg_vn.mp3" id="0x01A2" url="http://sheet-talk.local/stream/1.mp3" size="842 KB" />
-                   <AudioRow name="alert_system_failure.mp3" id="0x01A3" url="http://sheet-talk.local/stream/2.mp3" size="1.2 MB" />
-                   <AudioRow name="success_jingle.mp3" id="0x01A4" url="http://sheet-talk.local/stream/3.mp3" size="256 KB" />
+                    {batches.length > 0 ? batches.map((batch, idx) => {
+                     // Create a batch text for TTS
+                     const batchNum = batch.id;
+                     const batchText = batch.indices.map((i, subIdx) => {
+                       const entity = entities[i];
+                       const posInBatch = (i % 8) + 1;
+                       if (subIdx === 0) return `Lượt ${batchNum} số ${posInBatch} ${entity.fullname}`;
+                       return `số ${posInBatch} ${entity.fullname}`;
+                     }).join(", ");
+                     
+                     const googleUrl = `https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=${encodeURIComponent(batchText)}`;
+                     // Proxy URL for ESP32 compatibility
+                     const localProxyUrl = `${window.location.origin}/api/proxy-audio?url=${encodeURIComponent(googleUrl)}`;
+
+                     return (
+                       <AudioRow 
+                        key={idx}
+                        name={`Lượt ${batch.id}`} 
+                        id={`BATCH_ID: ${batch.id.toString(16).padStart(4, '0')}`} 
+                        url={localProxyUrl} 
+                        size={`${batch.startStt} - ${batch.endStt}`}
+                        onPlay={() => playBatch(batch.indices)} 
+                       />
+                     );
+                   }) : (
+                     <tr className="hover:bg-surface-container-highest/20 transition-colors group">
+                        <td className="px-6 py-10 text-center text-on-surface-variant text-sm font-display italic" colSpan={4}>
+                           Chưa có dữ liệu lượt. Hãy đồng bộ ở Bảng tính trước.
+                        </td>
+                     </tr>
+                   )}
                 </tbody>
               </table>
            </div>
@@ -502,7 +752,7 @@ function AudioManagement() {
   );
 }
 
-function AudioRow({ name, id, url, size }: { name: string, id: string, url: string, size: string }) {
+function AudioRow({ name, id, url, size, onPlay }: { key?: any, name: string, id: string, url: string, size: string, onPlay?: () => void }) {
   return (
     <tr className="hover:bg-surface-container-highest/20 transition-colors group">
       <td className="px-6 py-4">
@@ -514,6 +764,7 @@ function AudioRow({ name, id, url, size }: { name: string, id: string, url: stri
           </div>
         </div>
       </td>
+      <td className="px-6 py-4 text-xs font-mono text-on-surface-variant">{size}</td>
       <td className="px-6 py-4">
         <div className="flex items-center gap-2 bg-surface-container-lowest border border-outline-variant/50 rounded-lg px-2 py-1 w-fit">
           <span className="text-[10px] font-mono text-secondary truncate max-w-[200px]">{url}</span>
@@ -522,9 +773,12 @@ function AudioRow({ name, id, url, size }: { name: string, id: string, url: stri
           </button>
         </div>
       </td>
-      <td className="px-6 py-4 text-xs font-mono text-on-surface-variant">{size}</td>
       <td className="px-6 py-4 text-right">
-        <button className="p-2 rounded-full hover:bg-primary/10 text-primary transition-all active:scale-90">
+        <button 
+          onClick={onPlay}
+          className="p-2 rounded-full hover:bg-primary/10 text-primary transition-all active:scale-90"
+          title="Nghe thử lượt này"
+        >
           <PlayCircle size={20} />
         </button>
       </td>
@@ -532,7 +786,7 @@ function AudioRow({ name, id, url, size }: { name: string, id: string, url: stri
   );
 }
 
-function DeviceControls({ logs, addLog }: { logs: LogEntry[], addLog: (m: string, t?: LogEntry['type']) => void }) {
+function DeviceControls({ logs, addLog }: { key?: any, logs: LogEntry[], addLog: (m: string, t?: LogEntry['type']) => void }) {
   const [ EspStatus, setEspStatus ] = useState(true);
 
   const simulateButton = (name: string) => {
@@ -691,20 +945,20 @@ function DeviceControls({ logs, addLog }: { logs: LogEntry[], addLog: (m: string
                     <h5 className="text-[10px] font-display font-bold text-secondary uppercase tracking-[0.2em] mb-2">Sơ đồ chân GPIO (Pinout)</h5>
                     <div className="bg-surface p-4 rounded-2xl border border-outline-variant space-y-3 font-mono text-xs">
                        <div className="flex justify-between items-center text-on-surface-variant border-b border-outline-variant/10 pb-2">
-                          <span>GPIO 32</span>
-                          <span className="text-on-surface font-bold uppercase">Prev / Back</span>
+                          <span>GPIO 13</span>
+                          <span className="text-on-surface font-bold uppercase">Prev / Trở lại</span>
                        </div>
                        <div className="flex justify-between items-center text-on-surface-variant border-b border-outline-variant/10 pb-2">
-                          <span>GPIO 33</span>
-                          <span className="text-on-surface font-bold uppercase">Next / Skip</span>
+                          <span>GPIO 14</span>
+                          <span className="text-on-surface font-bold uppercase">Next / Tiếp theo</span>
                        </div>
                        <div className="flex justify-between items-center text-on-surface-variant border-b border-outline-variant/10 pb-2">
-                          <span>GPIO 25</span>
-                          <span className="text-on-surface font-bold uppercase">Play / Pause</span>
+                          <span>GPIO 27</span>
+                          <span className="text-on-surface font-bold uppercase">Play / Phát</span>
                        </div>
                        <div className="flex justify-between items-center text-on-surface-variant">
-                          <span>GPIO 26</span>
-                          <span className="text-on-surface font-bold uppercase">Reset / Sync</span>
+                          <span>GPIO 26, 25, 22</span>
+                          <span className="text-on-surface font-bold uppercase">I2S (BCLK, LRC, DOUT)</span>
                        </div>
                     </div>
                  </div>
@@ -722,20 +976,32 @@ function DeviceControls({ logs, addLog }: { logs: LogEntry[], addLog: (m: string
 {`#include "Audio.h"
 #include "WiFi.h"
 
-#define BTN_PREV 32
-#define BTN_NEXT 33
-#define BTN_PLAY 25
-#define BTN_SYNC 26
+// I2S Pins cho ESP32 DevKit V1
+#define I2S_BCLK 26
+#define I2S_LRC  25
+#define I2S_DOUT 22
+
+// Nút nhấn
+#define BTN_PREV 13
+#define BTN_NEXT 14
+#define BTN_PLAY 27
 
 Audio audio;
 int currentBatch = 1;
+const char* host = "https://your-app-url.run.app"; // Thay bằng URL app của bạn
 
 void setup() {
+  Serial.begin(115200);
   pinMode(BTN_PREV, INPUT_PULLUP);
   pinMode(BTN_NEXT, INPUT_PULLUP);
-  // I2S configuration...
-  WiFi.begin("SSID", "PASS");
-  audio.setPinout(26, 25, 27);
+  pinMode(BTN_PLAY, INPUT_PULLUP);
+
+  WiFi.begin("SSID", "PASSWORD");
+  while (WiFi.status() != WL_CONNECTED) delay(500);
+
+  // Khởi tạo I2S
+  audio.setPinout(I2S_BCLK, I2S_LRC, I2S_DOUT);
+  audio.setVolume(20); // 0...21
 }
 
 void loop() {
@@ -743,14 +1009,25 @@ void loop() {
   
   if(digitalRead(BTN_NEXT) == LOW) {
     currentBatch++;
-    playStream(currentBatch);
-    delay(300);
+    playBatch(currentBatch);
+    delay(500); // Debounce
+  }
+
+  if(digitalRead(BTN_PREV) == LOW && currentBatch > 1) {
+    currentBatch--;
+    playBatch(currentBatch);
+    delay(500);
   }
 }
 
-void playStream(int id) {
-  String url = "http://api.local/stream/" + String(id) + ".mp3";
+void playBatch(int id) {
+  // Sử dụng proxy endpoint để phát âm thanh tiếng Việt chuẩn Google
+  String url = String(host) + "/api/proxy-audio?url=" + 
+               "https://translate.google.com/translate_tts?ie=UTF-8&client=tw-ob&tl=vi&q=" + 
+               "Lượt+" + String(id) + "+chuẩn+bị";
+  
   audio.connecttohost(url.c_str());
+  Serial.println("Đang phát: " + url);
 }`}
                      </pre>
                   </div>
@@ -764,7 +1041,7 @@ void playStream(int id) {
 
 /* --- UTILITY COMPONENTS --- */
 
-function StatusCard({ title, value, subValue, status, icon }: { title: string, value: string, subValue: string, status: 'success' | 'primary' | 'tertiary', icon: JSX.Element }) {
+function StatusCard({ title, value, subValue, status, icon }: { key?: any, title: string, value: string, subValue: string, status: 'success' | 'primary' | 'tertiary', icon: any }) {
   const colorClass = status === 'success' ? 'text-secondary' : status === 'tertiary' ? 'text-tertiary' : 'text-primary';
   const bgColorClass = status === 'success' ? 'bg-secondary/10' : status === 'tertiary' ? 'bg-tertiary/10' : 'bg-primary/10';
   
@@ -784,7 +1061,7 @@ function StatusCard({ title, value, subValue, status, icon }: { title: string, v
   );
 }
 
-function Section({ children, title, icon, glass, onAction, actionLabel }: { children: React.ReactNode, title: string, icon: JSX.Element, glass?: boolean, onAction?: () => void, actionLabel?: string }) {
+function Section({ children, title, icon, glass, onAction, actionLabel }: { key?: any, children: any, title: string, icon: any, glass?: boolean, onAction?: () => void, actionLabel?: string }) {
   return (
     <div className={`space-y-4 ${glass ? 'backdrop-blur-sm' : ''}`}>
       <div className="flex items-center justify-between px-1">
@@ -810,7 +1087,7 @@ function StatItem({ label, value, highlight }: { label: string, value: string, h
   );
 }
 
-function SimuBtn({ icon, label, color, onClick }: { icon: JSX.Element, label: string, color?: 'amber' | 'blue', onClick: () => void }) {
+function SimuBtn({ icon, label, color, onClick }: { key?: any, icon: any, label: string, color?: 'amber' | 'blue', onClick: () => void }) {
   const colorMap = {
     amber: 'bg-tertiary/20 text-tertiary border-tertiary/30 hover:bg-tertiary/30',
     blue: 'bg-primary/20 text-primary border-primary/30 hover:bg-primary/30',
