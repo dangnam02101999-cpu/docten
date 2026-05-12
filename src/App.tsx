@@ -51,6 +51,23 @@ export default function App() {
     { time: '10:45:09', type: 'info', message: 'Playback started via Internal DAC' },
   ]);
 
+  useEffect(() => {
+    // Check backend health
+    fetch('/api/health')
+      .then(r => {
+        if (!r.ok) throw new Error(`HTTP Error ${r.status}`);
+        return r.json();
+      })
+      .then(d => {
+        console.log('Backend connection established:', d);
+        addLog('Kết nối hệ thống backend thành công.', 'success');
+      })
+      .catch(e => {
+        console.error('Backend health check failed:', e);
+        addLog(`Cảnh báo: Không thể kết nối API Backend (${e.message}). Một số tính năng có thể không hoạt động.`, 'warning');
+      });
+  }, []);
+
   const addLog = (message: string, type: LogEntry['type'] = 'info') => {
     const time = new Date().toLocaleTimeString('vi-VN', { hour12: false });
     setLogs(prev => [...prev, { time, type, message }]);
@@ -73,7 +90,7 @@ export default function App() {
             </div>
             <div>
               <h1 className="font-display font-bold text-lg text-on-surface leading-none">VietTTS</h1>
-              <span className="text-[10px] font-display font-bold text-on-surface-variant tracking-widest uppercase">Admin Panel</span>
+              <span className="text-[10px] font-display font-bold text-on-surface-variant tracking-widest uppercase">Bảng Quản Trị</span>
             </div>
           </div>
           <div className="bg-surface-container px-3 py-2 rounded-lg border border-outline-variant/30 flex items-center gap-3">
@@ -81,10 +98,10 @@ export default function App() {
                 <User size={16} className="text-on-surface-variant" />
              </div>
              <div className="flex-1 min-w-0">
-                <p className="text-xs font-bold truncate">Admin</p>
+                <p className="text-xs font-bold truncate">Quản trị viên</p>
                 <div className="flex items-center gap-1.5">
                   <div className="w-1.5 h-1.5 rounded-full bg-secondary animate-pulse" />
-                  <span className="text-[10px] text-secondary font-bold uppercase">Online</span>
+                  <span className="text-[10px] text-secondary font-bold uppercase">Trực tuyến</span>
                 </div>
              </div>
           </div>
@@ -217,10 +234,10 @@ function Dashboard({ setActiveTab, logs, syncInfo }: { key?: any, setActiveTab: 
       </header>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatusCard title="ESP32 STATUS" value="ONLINE" subValue="IP: 192.168.1.102" status="success" icon={<Cpu size={24} />} />
-        <StatusCard title="STREAM STATUS" value="ACTIVE" subValue="8080:TCP/HTTP" status="primary" icon={<Radio size={24} />} />
-        <StatusCard title="SD CARD" value="42%" subValue="13.2GB / 32GB" status="tertiary" icon={<HardDrive size={24} />} />
-        <StatusCard title="SHEET SYNC" value="OK" subValue={syncInfo.time} status="success" icon={<RefreshCw size={24} />} />
+        <StatusCard title="TRẠNG THÁI ESP32" value="TRỰC TUYẾN" subValue="IP: 192.168.1.102" status="success" icon={<Cpu size={24} />} />
+        <StatusCard title="TRẠNG THÁI LUỒNG" value="ĐANG CHẠY" subValue="8080:TCP/HTTP" status="primary" icon={<Radio size={24} />} />
+        <StatusCard title="THẺ NHỚ SD" value="42%" subValue="13.2GB / 32GB" status="tertiary" icon={<HardDrive size={24} />} />
+        <StatusCard title="ĐỒNG BỘ SHEET" value="TỐT" subValue={syncInfo.time} status="success" icon={<RefreshCw size={24} />} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -233,13 +250,13 @@ function Dashboard({ setActiveTab, logs, syncInfo }: { key?: any, setActiveTab: 
               <div className="relative z-10">
                 <div className="flex items-center gap-2 text-[10px] font-display font-bold text-primary tracking-widest uppercase mb-2">
                   <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
-                  Live Preview
+                  Xem Trước Trực Tiếp
                 </div>
-                <h4 className="text-sm font-display font-bold text-on-surface-variant uppercase mb-1">FILE_ID: 992-VN-F01</h4>
+                <h4 className="text-sm font-display font-bold text-on-surface-variant uppercase mb-1">MÃ_TỆP: 992-VN-F01</h4>
                 <p className="text-xl font-bold mb-4">thong_bao_chuyen_tau.mp3</p>
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs font-display font-bold text-on-surface-variant">
-                    <span>PROGRESS: 65%</span>
+                    <span>TIẾN ĐỘ: 65%</span>
                     <span>128 kbps</span>
                   </div>
                   <div className="h-2 bg-surface rounded-full overflow-hidden">
@@ -385,7 +402,8 @@ function SheetsConfig({ addLog, entities, setEntities, syncInfo, setSyncInfo }: 
         result = await response.json();
       } else {
         const text = await response.text();
-        throw new Error(`Phản hồi từ máy chủ không hợp lệ (Không phải JSON): ${text.substring(0, 50)}...`);
+        const displayErr = text.length > 100 ? text.substring(0, 100) + "..." : text;
+        throw new Error(`Phản hồi từ máy chủ không hợp lệ (Status: ${response.status}). Nội dung: ${displayErr}`);
       }
       
       if (!response.ok) {
@@ -696,7 +714,7 @@ function AudioManagement({ addLog, entities }: { key?: any, addLog: (m: string, 
               </div>
            </div>
            <div className="text-right shrink-0">
-             <p className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-widest mb-1">Uptime</p>
+             <p className="text-[10px] font-display font-bold text-on-surface-variant uppercase tracking-widest mb-1">Thời gian hoạt động</p>
              <p className="text-lg font-mono font-bold text-primary">14:22:05</p>
            </div>
         </div>
@@ -895,7 +913,7 @@ function DeviceControls({ logs, addLog }: { key?: any, logs: LogEntry[], addLog:
                        <div className="w-3 h-3 rounded-full bg-amber-500/30 border border-amber-500/50" />
                        <div className="w-3 h-3 rounded-full bg-green-500/30 border border-green-500/50" />
                     </div>
-                    <span className="text-[10px] font-display font-bold text-slate-500 uppercase tracking-widest">Serial Console Output</span>
+                    <span className="text-[10px] font-display font-bold text-slate-500 uppercase tracking-widest">Dữ liệu đầu ra Serial Console</span>
                   </div>
                   <span className="text-[10px] font-mono text-slate-700 tracking-widest">Baud: 115200</span>
                </div>

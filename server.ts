@@ -7,6 +7,8 @@ import fs from "fs";
 import cors from "cors";
 import crypto from "crypto";
 
+console.log(">>> SERVER BOOTING... NODE_ENV:", process.env.NODE_ENV);
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -26,10 +28,16 @@ async function startServer() {
   // Serve cached audio files
   app.use("/audio", express.static(CACHE_DIR));
 
+  // Health check route
+  app.get("/api/health", (req, res) => {
+    res.json({ status: "ok", time: new Date().toISOString() });
+  });
+
   // API Route for Google Sheets / Apps Script Sync
   app.post("/api/sync-sheet", async (req, res) => {
+    console.log("--- BẮT ĐẦU YÊU CẦU ĐỒNG BỘ ---");
     const { sheetUrl } = req.body;
-    console.log(`Received sync request for URL: ${sheetUrl}`);
+    console.log(`Nhận yêu cầu đồng bộ cho URL: ${sheetUrl}`);
 
     if (!sheetUrl) {
       return res.status(400).json({ error: "Thiếu đường dẫn (Sheet URL hoặc script URL)" });
@@ -38,8 +46,9 @@ async function startServer() {
     try {
       let results = [];
 
-      // Check if it's a Google Apps Script Web App
+      // Kiểm tra nếu là Google Apps Script Web App
       if (sheetUrl.includes("script.google.com")) {
+        console.log("Đang xử lý link Apps Script...");
         const response = await axios.get(sheetUrl);
         const data = typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
         
@@ -49,13 +58,13 @@ async function startServer() {
 
         results = data.map((item: any) => ({
           stt: item.stt?.toString().padStart(3, '0') || "000",
-          fullname: item.ten || item.fullname || "N/A",
-          extractedName: item.ten || item.fullname || "N/A",
+          fullname: item.ten || item.fullname || "Không xác định",
+          extractedName: item.ten || item.fullname || "Không xác định",
           group: "APPS SCRIPT",
           mp3: item.mp3
         }));
       } else {
-        // More robust Sheet ID extraction
+        // Trích xuất ID và GID (tab) từ link Google Sheet
         let sheetId = "";
         const idMatch = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]{15,})/);
         if (idMatch) {
@@ -65,42 +74,52 @@ async function startServer() {
         }
 
         if (!sheetId) {
-          return res.status(400).json({ error: "Link hoặc ID Google Sheet không hợp lệ" });
+          console.error("Không trích xuất được Sheet ID từ:", sheetUrl);
+          return res.status(400).json({ error: "Link hoặc ID Google Sheet không hợp lệ. Vui lòng kiểm tra lại link." });
         }
-        const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+
+        // Kiểm tra xem có parameter gid không (để lấy đúng tab)
+        const gidMatch = sheetUrl.match(/[?&]gid=([0-9]+)/);
+        const gid = gidMatch ? gidMatch[1] : "0";
         
-        console.log(`Fetching CSV from: ${csvUrl}`);
+        const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}`;
+        
+        console.log(`Đang tải dữ liệu CSV từ: ${csvUrl}`);
         const response = await axios.get(csvUrl);
         const csvData = response.data;
 
-        // Check if we got HTML instead of CSV (Google redirects to login if not public)
+        // Kiểm tra nếu nhận được HTML thay vì CSV (Lỗi quyền truy cập)
         if (typeof csvData === 'string' && (csvData.includes('<!DOCTYPE html>') || csvData.includes('<html'))) {
-          console.error("Received HTML instead of CSV for Sheet ID:", sheetId);
+          console.error("Nhận được HTML thay vì CSV cho Sheet ID:", sheetId);
           return res.status(403).json({ 
-            error: "Tệp Google Sheet chưa được công khai. Vui lòng chọn 'Bất kỳ ai có liên kết đều có thể xem' (Anyone with the link can view)." 
+            error: "Tệp Google Sheet chưa được công khai. Tại Google Sheets, hãy bấm 'Chia sẻ' -> 'Bất kỳ ai có liên kết đều có thể xem'." 
           });
         }
         
         const lines = csvData.split("\n");
+        console.log(`Tìm thấy ${lines.length} dòng trong CSV.`);
+
         for (let i = 0; i < lines.length; i++) {
           const line = lines[i].trim();
           if (!line) continue;
           
-          // Better CSV split handling quotes
+          // Xử lý CSV split có dấu ngoặc kép
           const columns = line.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/).map(c => c.trim().replace(/^"|"$/g, ""));
           
-          // Skip header if it looks like one (contains 'Họ tên' or 'FullName' or 'STT')
-          if (i === 0 && (line.toLowerCase().includes("họ tên") || line.toLowerCase().includes("fullname") || line.toLowerCase().includes("stt"))) {
+          // Bỏ qua dòng tiêu đề
+          const firstCol = columns[0]?.toLowerCase() || "";
+          const secondCol = columns[1]?.toLowerCase() || "";
+          if (i === 0 && (firstCol.includes("stt") || secondCol.includes("họ tên") || secondCol.includes("fullname"))) {
             continue;
           }
 
           if (columns.length < 2) continue;
 
-          const sttRaw = columns[0] || i.toString();
-          const stt = parseInt(sttRaw);
+          const sttRaw = columns[0] || (i + 1).toString();
+          const stt = parseInt(sttRaw) || (i + 1);
           const fullname = columns[1] || "";
           
-          if (fullname) {
+          if (fullname && fullname !== "Họ và Tên") {
             const batchNum = Math.floor((stt - 1) / 8 + 1);
             const posInBatch = ((stt - 1) % 8 + 1);
             const ttsText = `Lượt ${batchNum} số ${posInBatch} ${fullname}`;
@@ -117,6 +136,7 @@ async function startServer() {
         }
       }
 
+      console.log(`Đồng bộ thành công ${results.length} bản ghi.`);
       res.json({ 
         success: true, 
         data: results,
@@ -125,8 +145,15 @@ async function startServer() {
       });
 
     } catch (error: any) {
-      console.error("Sync Error:", error.message);
-      res.status(500).json({ error: "Lỗi đồng bộ: " + error.message });
+      console.error("Lỗi đồng bộ chi tiết:", error.message);
+      if (error.response) {
+        console.error("Mã lỗi HTTP:", error.response.status);
+        console.error("Dữ liệu phản hồi:", error.response.data?.substring?.(0, 100));
+        return res.status(error.response.status).json({ 
+          error: `Google Sheets trả về lỗi ${error.response.status}. Hãy đảm bảo link tồn tại và đã được chia sẻ công khai.` 
+        });
+      }
+      res.status(500).json({ error: "Lỗi hệ thống: " + error.message });
     }
   });
 
@@ -163,6 +190,12 @@ async function startServer() {
       console.error("Proxy Audio Error:", error.message);
       res.status(500).send(error.message);
     }
+  });
+
+  // Catch-all for unknown /api routes
+  app.all("/api/*", (req, res) => {
+    console.warn(`Unknown API route requested: ${req.method} ${req.url}`);
+    res.status(404).json({ error: `Đường dẫn API không tồn tại: ${req.url}` });
   });
 
   // Vite middleware for development
