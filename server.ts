@@ -30,6 +30,7 @@ async function startServer() {
 
   // Health check route
   app.get("/api/health", (req, res) => {
+    console.log(`Health check from ${req.ip}`);
     res.json({ status: "ok", time: new Date().toISOString() });
   });
 
@@ -37,7 +38,7 @@ async function startServer() {
   app.post("/api/sync-sheet", async (req, res) => {
     console.log("--- BẮT ĐẦU YÊU CẦU ĐỒNG BỘ ---");
     const { sheetUrl } = req.body;
-    console.log(`Nhận yêu cầu đồng bộ cho URL: ${sheetUrl}`);
+    console.log(`Nhận yêu cầu đồng bộ cho URL: ${sheetUrl} từ ${req.ip}`);
 
     if (!sheetUrl) {
       return res.status(400).json({ error: "Thiếu đường dẫn (Sheet URL hoặc script URL)" });

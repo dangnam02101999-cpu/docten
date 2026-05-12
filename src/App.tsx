@@ -252,11 +252,11 @@ function Dashboard({ setActiveTab, logs, syncInfo }: { key?: any, setActiveTab: 
                   <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
                   Xem Trước Trực Tiếp
                 </div>
-                <h4 className="text-sm font-display font-bold text-on-surface-variant uppercase mb-1">MÃ_TỆP: 992-VN-F01</h4>
+                <h4 className="text-sm font-display font-bold text-on-surface-variant uppercase mb-1">Mã tệp: 992-VN-F01</h4>
                 <p className="text-xl font-bold mb-4">thong_bao_chuyen_tau.mp3</p>
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs font-display font-bold text-on-surface-variant">
-                    <span>TIẾN ĐỘ: 65%</span>
+                    <span>Tiến độ: 65%</span>
                     <span>128 kbps</span>
                   </div>
                   <div className="h-2 bg-surface rounded-full overflow-hidden">
@@ -299,7 +299,7 @@ function Dashboard({ setActiveTab, logs, syncInfo }: { key?: any, setActiveTab: 
                 onClick={() => setActiveTab('sheets')}
                 className="w-full py-3 bg-surface-container-highest border border-outline-variant rounded-xl text-xs font-bold font-display uppercase tracking-widest hover:bg-primary-container hover:text-white transition-all flex items-center justify-center gap-2"
               >
-                Cấu hình ngay <ChevronRight size={14} />
+                Cài đặt ngay <ChevronRight size={14} />
               </button>
            </div>
 
